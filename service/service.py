@@ -1,8 +1,9 @@
 import json
 import xmltodict
+import yaml
 
 from xml.parsers.expat import ExpatError
-from flask import Flask, request, Response
+from flask import Flask, request, Response, jsonify
 import os
 import requests
 
@@ -11,20 +12,33 @@ from dotdictify import Dotdictify
 
 app = Flask(__name__)
 
+
 ##Helper function for yielding on batch fetch
 def stream_json(entities):
-    first = True
-    yield '['
-    for i, row in enumerate(entities):
-        if not first:
-            yield ','
-        else:
-            first = False
-        yield json.dumps(row)
-    yield ']'
+    logger.info("streaming started")
+    # number_id = 112
+    try:
+        first = True
+        yield '['
+        for i, row in enumerate(entities):
+            if not first:
+                yield ','
+            else:
+                first = False
+            # yield json.dumps({'alt_id': f'{number_id}'})
+            # yield ','
+            yield json.dumps(row)
+            # number_id + 1
+        yield ']'
+    except Exception as e:
+        logger.error(f"Exiting with error : {e}")
+    logger.info("stream ended")
+
+
 ##
 
 logger = logger.Logger('xml')
+
 
 class XmlParser:
     def __init__(self, args):
@@ -46,14 +60,18 @@ class XmlParser:
                 l = [Dotdictify(root_element).get(self._xml_path)]
         else:
             try:
-                imbedded_xml = xmltodict.parse("<html>" + root_element["ichicsr"]["safetyreport"]["patient"]["parent"]["parentmedicalrelevanttext"] + "</html>")
-                root_element["ichicsr"]["safetyreport"]["patient"]["parent"]["parentmedicalrelevanttext"] = imbedded_xml["html"]
+                embedded_xml = xmltodict.parse("<html>" + root_element["ichicsr"]["safetyreport"]["patient"]["parent"][
+                    "parentmedicalrelevanttext"] + "</html>")
+                root_element["ichicsr"]["safetyreport"]["patient"]["parent"]["parentmedicalrelevanttext"] = \
+                embedded_xml["html"]
             except TypeError as e:
-                logger.info(f"None imbedded xml defined. Failing with error: {e}")
+                logger.info(f"No embedded xml defined. Failing with error: {e}")
             except ExpatError as e:
-                logger.info(f"None imbedded xml defined. Failing with error: {e}")
+                logger.info(f"No embedded xml defined. Failing with error: {e}")
             except KeyError as e:
-                logger.info(f"None imbedded xml element of {e}")
+                logger.info(f"No embedded xml element of {e}")
+            except UnboundLocalError as e:
+                logger.info(f"No embedded xml element of {e}")
 
             l = [root_element]
 
@@ -84,14 +102,14 @@ def get():
 def get_folder():
     parser = XmlParser(request.args)
     url = request.args["url"]
-    xml = requests.get(url).content  
-    xml_json = json.loads(xml)
+    xml = requests.get(url).content.decode('utf-8-sig')
+    xml_to_dict = yaml.load(xml)
     xml_content = []
-    for xml_file in xml_json["files"]:
+    for xml_file in xml_to_dict['files']:
         try:
             parsed_xml = parser.parse(str(xml_file))
-            #logger.info(f"Printing content of parsed xml : {parsed_xml}")
-            xml_content.append(parsed_xml)
+            # logger.info(f"Printing content of parsed xml : {parsed_xml}")
+            xml_content.append(parsed_xml[0])
         except Exception as e:
             logger.info(f"Skipping xml file with error : {e}")
 
@@ -111,4 +129,4 @@ def post():
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT',5000)))
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
